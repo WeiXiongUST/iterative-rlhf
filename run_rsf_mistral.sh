@@ -17,7 +17,7 @@ read -p "按回车键继续..."
 python ./transform.py --dataset_path ${model_dir}/data/gen_data --my_idx ${i}
 accelerate launch ./get_reward.py --dataset_name_or_path ${model_dir}/data/gen_data.json --output_dir ${model_dir}/data --record_dir ${base_dir}/reward_record.txt 
 #accelerate launch /home/xiongwei/rsf/get_kl.py --model_name_or_path weqweasdas/rsf_plus_gemma2b_iter1 --dataset_name_or_path ${model_dir}/data/data_with_rewards.json --output_dir ${model_dir}/data --record_dir ${base_dir}/reward_record.txt 
-python write_yaml.py  ${sft_model} ${base_dir}/model${(i+1)} ./config_full_mistral.yaml ${base_dir}/model${i}/data/top1_data.json
+python write_config.py  ${sft_model} ${base_dir}/model${(i+1)} ./config_full_mistral.yaml ${base_dir}/model${i}/data/top1_data.json
 
 ACCELERATE_LOG_LEVEL=info accelerate launch --config_file ./deepspeed_zero3.yaml ./weighted_sft.py ./config_full_mistral.yaml
 
