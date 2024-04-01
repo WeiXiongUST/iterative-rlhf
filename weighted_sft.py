@@ -278,9 +278,6 @@ def main():
     parser = H4ArgumentParser((ModelArguments, DataArguments, SFTConfig))
     model_args, data_args, training_args = parser.parse()
 
-    #print(data_args)
-    #while True:
-    #    pass
     # Set seed for reproducibility
     set_seed(training_args.seed)
 
@@ -318,7 +315,8 @@ def main():
     # Load datasets
     ###############
 
-    my_data_dir = data_args.dataset_splits[0]
+    my_data_dir = data_args.dataset_splits
+    print(data_args.dataset_splits, my_data_dir)
     assert "top1_data.json" in my_data_dir
     train_data = load_dataset(
         "json", data_files=my_data_dir, split="train", field="instances").shuffle()
@@ -334,18 +332,32 @@ def main():
     # tokenizer.pad_token = tokenizer.eos_token
     # tokenizer.pad_token_id = tokenizer.eos_token_id
 
+
     def tokenize_fn(sample):
-        # sample['prompt'].replace("<s>", "") + sample['response'] + tokenizer.bos_token #replace(tokenizer.bos_token, "")
+        #sample['prompt'].replace("<s>", "") + sample['response'] + tokenizer.bos_token #replace(tokenizer.bos_token, "")
         # sample['text'] = sample['prompt'].replace(
         #    "<s>[INST]", "<|user|>\n").replace("[/INST]", "</s>\n<|assistant|>\n") + sample['response']
-        sample['text'] = sample['prompt'] + sample['response']
+        #sample['text'] = sample['prompt'] + sample['response']
         #sample['reward'] = 
+    
+        prom = sample['prompt'].replace("<bos><start_of_turn>user\n", "").replace(
+            "<bos>\n", "").replace("<end_of_turn>\n<start_of_turn>model\n", "")
+        resp = sample['response'].replace("<start_of_turn>model\n", "")
+        final_resp = resp.split("<start_of_turn>user")[0]
+
+        message = [
+            {"role": "user", "content": prom},
+            {"role": "assistant", "content": final_resp},
+        ]
+        sample['text'] = tokenizer.apply_chat_template(message, tokenize=False).replace(tokenizer.bos_token, "") + tokenizer.eos_token
+
+
         return sample
     train_dataset = train_data.map(tokenize_fn, batched=False)
     
 
-    # print(train_dataset[0])
-    # print(train_dataset[1])
+    print(train_dataset[0])
+    print(train_dataset[1])
 
     eval_dataset = train_dataset.select(
         range(100))  # raw_datasets["test"]
@@ -387,7 +399,7 @@ def main():
         #packing=True,
         # peft_config=get_peft_config(model_args),
     )
-
+    print(trainer.train_dataset[0])
 
 
     ###############
