@@ -156,7 +156,7 @@ def get_kl(ds, model, ref_model, tokenizer, device):
     kl_seq = []
     prob_seq = []
     data = []
-    count = 0
+    len_count = 0
     #query = test_texts[i]
     with torch.no_grad():
         for sample in tqdm(ds):
@@ -172,6 +172,7 @@ def get_kl(ds, model, ref_model, tokenizer, device):
                 inputs = tokenizer(one_input + one_response, return_tensors="pt", padding=True).to(device)
 
                 response_len = len(inputs["input_ids"][0]) - query_len
+                len_count.append(len(inputs["input_ids"][0]))
                 logits = model(**inputs)['logits']
                 ref_logits = ref_model(**inputs)['logits']
 
@@ -196,12 +197,12 @@ def get_kl(ds, model, ref_model, tokenizer, device):
     
     print(np.mean(kl_seq), "kl")
     #print(prob_seq, "log_prob")
-    return data, np.mean(kl_seq)
+    return data, np.mean(kl_seq), np.mean(len_count)
 
 
 
 
-my_data, kl_score = get_kl(ds, model, ref_model, tokenizer, device)
+my_data, kl_score, ave_len = get_kl(ds, model, ref_model, tokenizer, device)
 
 
 
@@ -210,16 +211,18 @@ all_process_list =[{}] * world_size
 
 data_to_send = {
     'data': my_data,
-    'kl_scores': np.mean(kl_score)
+    'kl_scores': np.mean(kl_score),
+    'len': ave_len
 }
 dist.all_gather_object(all_process_list, data_to_send)
 gathered_data = []
 gathered_scores = []
+gathered_len = []
 
 for i in range(world_size):
     gathered_scores += all_process_list[i]['kl_scores']
     gathered_data.extend(all_process_list[i]['data'])
-
+    gathered_len.extend(all_process_list[i]['len'])
 if local_rank == 0:
     output_eval_dataset = {}
     output_eval_dataset['type'] = 'text_only'
@@ -227,5 +230,6 @@ if local_rank == 0:
     with open(script_args.output_dir + "/data_with_kls.json", 'w', encoding='utf8') as f:
         json.dump(output_eval_dataset, f, ensure_ascii=False)
     mean_kl = np.mean(gathered_scores)
+    mean_len = np.mean(gathered_len)
     with open(script_args.record_dir, 'a') as f:
-        f.write(str(mean_kl) + "\t" + str(gathered_scores/4) + "\n")
+        f.write(str(mean_kl) + "\t" + str(mean_len) +  "\n")
