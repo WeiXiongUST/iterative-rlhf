@@ -72,8 +72,8 @@ script_args = parser.parse_args_into_dataclasses()[0]
 
 ds_dir = script_args.dataset_name_or_path
 world_size = int(os.getenv("WORLD_SIZE", "1"))
-ds = load_dataset("json", data_files="/home/xiongwei/rsf_gemma_2b_058/model1/data/data_with_kls.json", split="train", field="instances")
-#ds = load_dataset("weqweasdas/rsf_gemma_2b_iter1", split="train")['instances'][0]
+#ds = load_dataset("json", data_files="/home/xiongwei/rsf_gemma_2b_058/model1/data/data_with_kls.json", split="train", field="instances")
+ds = load_dataset("weqweasdas/rsf_pi0_iter1", split="train")['instances'][0]
 
 
 
@@ -84,7 +84,7 @@ cnt = 0
 
 
 
-C = 20
+C = 8
 zzz = 0
 # tqdm is used to show the progress bar
 ratio = []
@@ -93,10 +93,10 @@ with torch.no_grad():
     for sample in tqdm(ds):
 
         rewards = sample['rewards']
-        kls = sample['kl']
+        #kls = sample['kl']
 
         nor_rewards = (np.array(rewards) - 2.763559730912877) / 3.1306514245147348
-        exp_nor_rewards = np.exp(C * nor_rewards - np.array(kls))
+        exp_nor_rewards = np.exp(C * nor_rewards) #- np.array(kls))
 
         weights = exp_nor_rewards / np.sum(exp_nor_rewards)
         idx = np.argmax(nor_rewards)
