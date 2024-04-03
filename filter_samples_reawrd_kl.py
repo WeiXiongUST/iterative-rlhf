@@ -115,10 +115,10 @@ print(cnt)
 
 
 
-'''
+
 output_eval_dataset = {}
 output_eval_dataset['type'] = 'text_only'
 output_eval_dataset['instances'] = top1_data
 with open(script_args.output_dir + "/top1_data.json", 'w', encoding='utf8') as f:
     json.dump(output_eval_dataset, f, ensure_ascii=False)
-'''
+
