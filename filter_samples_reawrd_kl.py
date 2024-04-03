@@ -95,7 +95,7 @@ with torch.no_grad():
         rewards = sample['rewards']
         #kls = sample['kl']
 
-        nor_rewards = (np.array(rewards) - 2.763559730912877) / 3.1306514245147348
+        nor_rewards = (np.array(rewards) - 2.35) / 2.8706514245147348
         exp_nor_rewards = np.exp(C * nor_rewards) #- np.array(kls))
 
         weights = exp_nor_rewards / np.sum(exp_nor_rewards)
