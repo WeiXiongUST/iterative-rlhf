@@ -36,7 +36,7 @@ class ScriptArguments:
         #default="/home/xiongwei/zqw_data_test/iter3_online.json",
         #default="/home/xiongwei/over_opt/LMFlow_RAFT_Dev/output_models/12_30/raft/baseline/iter5/gen.json",
         #default="/home/xiongwei/rm_study/LMFlow/output_models/exp_no_sharegpt/open_llama_3b_v2_instruction_following_1epoch_on_hh_bz12/eval/my_eval.json",
-        default="google/gemma-2b-it",
+        default="HuggingFaceH4/mistral-7b-sft-beta",
         metadata={"help": "the location of the output file"},
     )
     
@@ -131,18 +131,7 @@ data_size = len(ds['prompt'])
 share = int(data_size / world_size) 
 ds = ds.select(np.arange(local_rank * share, (local_rank + 1)*share))
 
-optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001)
-optimizer2 = torch.optim.SGD(filter(lambda p: p.requires_grad, ref_model.parameters()), lr=0.0001)
 
-data_collator = DataCollatorForSeq2Seq(tokenizer, max_length=9999, pad_to_multiple_of=1)
-
-dataloader1 = DataLoader(ds, batch_size=16, shuffle=False, collate_fn=data_collator)
-dataloader2 = DataLoader(ds, batch_size=16, shuffle=False, collate_fn=data_collator)
-
-
-model, dl, opt = accelerator.prepare(model, dataloader1, optimizer)
-
-ref_model, dl2, opt2 = accelerator2.prepare(ref_model, dataloader2, optimizer2)
 
 
 
@@ -156,7 +145,7 @@ def get_kl(ds, model, ref_model, tokenizer, device):
     kl_seq = []
     prob_seq = []
     data = []
-    len_count = 0
+    len_count = []
     #query = test_texts[i]
     with torch.no_grad():
         for sample in tqdm(ds):
@@ -222,7 +211,7 @@ gathered_len = []
 for i in range(world_size):
     gathered_scores += all_process_list[i]['kl_scores']
     gathered_data.extend(all_process_list[i]['data'])
-    gathered_len.extend(all_process_list[i]['len'])
+    gathered_len.append(all_process_list[i]['len'])
 if local_rank == 0:
     output_eval_dataset = {}
     output_eval_dataset['type'] = 'text_only'
