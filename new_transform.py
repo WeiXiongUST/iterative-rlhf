@@ -1,126 +1,116 @@
-#!/usr/bin/env python
-import os
-import pickle
-from argparse import ArgumentParser
+import numpy as np
+from typing import Optional, List
+import torch.nn as nn
+from transformers import AutoTokenizer, HfArgumentParser, pipeline
+from tqdm import tqdm
+from datasets import load_dataset
+import torch
+import json
+from typing import Optional
+from dataclasses import dataclass, field
+import time
+from transformers import AutoTokenizer, HfArgumentParser, pipeline, DataCollatorForSeq2Seq
+
 
 import numpy as np
-import pandas as pd
-import torch
-from datasets import load_from_disk, load_dataset
-from tqdm.auto import tqdm
-from transformers import AutoTokenizer
-from vllm import LLM, SamplingParams
-from transformers import AutoTokenizer, HfArgumentParser, pipeline, DataCollatorForSeq2Seq
-from dataclasses import dataclass, field
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-from typing import Optional, List
+def calculate_text_similarity(text1, text2):
+    """
+    计算两个文本的余弦相似度。
+
+    参数:
+    text1 (str): 第一个文本
+    text2 (str): 第二个文本
+
+    返回:
+    float: 两个文本之间的余弦相似度
+    """
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform([text1, text2])
+    similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])
+
+    return similarity[0][0]
+
+#####
+# This script takes a dataset as the input, where each sample is {"input": "the pormpt", "output": ["response1", "response2", "response3", ...]}
+# The script will compute the reward for each input-output pair, and eventually output a new dataset, where each sample contains {"input": "the pormpt", "output": ["response1", "response2", "response3", ...], "rewards": [reward1, reward2, ...]}
+# Due to memory constraint, we will set the reward of the input+output that is longer than 800 tokens as -999999, which should be discarded in later processing. It should be at most ~2% samples that are discarded.
+#####
 
 @dataclass
 class ScriptArguments:
     """
     The arguments for the DPO training script.
     """
-    model_name_or_path: Optional[str] = field(
-        default="/home/xiongwei/gshf_gold_test/LMFlow_RAFT_Dev/output_models/online_dpo/new_iter2/checkpoint-pymodel2120",
-        metadata={"help": "the location of the SFT model name or path"},
-    )
-    dataset_name_or_path: Optional[str] = field(
-        default="/home/xiongwei/gshf_gold_test/LMFlow_RAFT_Dev/output_models/online_dpo/iter1",
-        metadata={"help": "the location of the dataset name or path"},
-    )
-    share: Optional[int] = field(
-        default=999,
+    dataset_path: Optional[str] = field(
+        default="/home/xx/xw/rsf/rsf_hf_mistral_rsf_baseline/model0/data/gen_data",
         metadata={"help": "the location of the dataset name or path"},
     )
     output_dir: Optional[str] = field(
         default="",
         metadata={"help": "the location of the output file"},
     )
-    my_world_size: Optional[int] = field(
-        default=4,
-        metadata={"help": "the location of the dataset name or path"},
+    my_idx: Optional[str] = field(
+        default="",
+        metadata={"help": "the location of the output file"},
     )
-
-
+from collections import defaultdict
 
 
 parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 
-model_path = script_args.model_name_or_path
-print('model_path', model_path)
-seed = 42
-# set seed
-torch.manual_seed(seed)
-np.random.seed(seed)
+data_ret = defaultdict(list)
 
-llm = LLM(model=model_path,
-          tokenizer=model_path,
-          dtype='bfloat16', max_model_len=4096,
-          #download_dir='/data/huggingface/',
-          load_format='auto',
-          seed=42
-          # gpu_memory_utilization=0.95,
-          )
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-
-sampling_params = SamplingParams(temperature=1.0, top_p=1.0, max_tokens=2048, n=8, stop_token_ids=[tokenizer.eos_token_id],stop=["<|user|>"])
-ds = load_dataset("weqweasdas/ultra_prompt_split", split="prompt" + script_args.dataset_name_or_path)#.select(range(200))
-
-data_size = len(ds['prompt'])
-one_num_share = int(data_size / script_args.my_world_size)
-ds = ds.select(np.arange(script_args.share * one_num_share, (script_args.share + 1)*one_num_share))
-
-print([script_args.share * one_num_share, (script_args.share + 1)*one_num_share])
-
-print(ds, script_args.dataset_name_or_path)
-
-# use tokenizer.apply_template to apply the template to the prompt
-ds = ds.map(lambda x: {"final_prompt": tokenizer.apply_chat_template(
-    x['prompt'], tokenize=False, add_generation_prompt=True)})
-
-
-
-prompts = ds['final_prompt']#[:2]
-old_prompts = ds['prompt']#[:2]
-
-outputs = llm.generate(prompts, sampling_params=sampling_params, use_tqdm=True)
-import json
-
-completions = []
-used_prompts = []
+repeat_num_0 = 0
+old_ds = load_dataset("weqweasdas/ultra_prompt_split", split="prompt" + script_args.my_idx).select(range(9999))
+all_prompt = [x[0]['content'] for x in old_ds['prompt']]
+print(len(all_prompt))
+print(all_prompt[0])
 gathered_data = []
-for i, output in enumerate(outputs):
-    tmp_data = {'old_prompt':old_prompts[i], "prompt": prompts[i], "responses": [out.text for out in output.outputs]}
-    gathered_data.append(tmp_data)
+for j in range(4):
+    ds = load_dataset("json", data_files=script_args.dataset_path + str(j) + ".json", split="train",
+                      field="instances")  # .select(range(500))
+    for sample in ds:
+        #clean_prom = sample['old_prompt'][0]['content'] #
+        #clean_prom = sample['prompt'].replace("<bos><start_of_turn>user\n", "").replace("</s>\n", "").replace("<end_of_turn>\n<start_of_turn>model\n", "")
+        clean_prom = sample['prompt'].replace("<|user|>\n", "").replace(
+        "</s>\n", "").replace("<|assistant|>\n", "")
+        
+        if len(sample['responses']) < 8:
+            continue
+        if clean_prom in all_prompt:
+            gathered_data.append({"prompt": sample['prompt'], "responses": sample['responses']})
+        else:
+            #all_similiairities = np.array([cosine_similarity_strings(clean_prom, z) for z in all_prompt])
+            #if np.sum(all_similiairities > 0.85) > 0:
+            try:
+                #print(clean_prom, sample['old_prompt'][0]['content'])
+                
+                if calculate_text_similarity(clean_prom, sample['old_prompt'][0]['content']) > 0.85:
+                    #print("yes")
+                    #data_ret[sample['prompt']].append(sample['responses'][0])
+                    gathered_data.append({"prompt": sample['prompt'], "responses": sample['responses']})
+                    
+            except:
+                pass
+            #print(clean_prom,  "@@@@", sample['old_prompt'][0]['content'], "\n\n\n##############")
+            #time.sleep(5)
+
+
+
+
+print(len(gathered_data))
+
+
+#print(len(gathered_data))
 
 
 output_eval_dataset = {}
 output_eval_dataset['type'] = 'text_only'
 output_eval_dataset['instances'] = gathered_data
-print("I collect ", len(gathered_data), "samples")
-
-
-with open(script_args.output_dir + "/gen_data" + str(script_args.share) + ".json", 'w', encoding='utf8') as f:
+with open(script_args.dataset_path + ".json", 'w', encoding='utf8') as f:
     json.dump(output_eval_dataset, f, ensure_ascii=False)
 
-
-'''
-
-gathered_data = []
-all_prompts_ = ds['final_prompt']
-old_prompts_ = ds['prompt']
-for i in range(len(ds)):
-    tmp_data = {'old_prompt':old_prompts_[i], "prompt": all_prompts_[i], "responses": responses[i]}
-    gathered_data.append(tmp_data)
-
-output_eval_dataset = {}
-output_eval_dataset['type'] = 'text_only'
-output_eval_dataset['instances'] = gathered_data
-print("I collect ", len(gathered_data), "samples")
-
-
-with open("/home/zihaoli5/rsf/rsf_mistral_07/data/gen_data8.json", 'w', encoding='utf8') as f:
-    json.dump(output_eval_dataset, f, ensure_ascii=False)
-####
-'''
